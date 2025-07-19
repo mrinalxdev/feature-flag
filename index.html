@@ -1,0 +1,366 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.decomposition import PCA
+from sklearn.metrics.pairwise import euclidean_distances
+import seaborn as sns
+from matplotlib.widgets import Button, TextBox
+import pandas as pd
+
+class VectorEmbeddingVisualizer:
+    def __init__(self):
+        """Initialize the vector embedding visualizer"""
+        self.sentences = []
+        self.embeddings = None
+        self.distances = None
+        self.positions_2d = None
+        
+        # Initialize TF-IDF vectorizer
+        self.vectorizer = TfidfVectorizer(
+            max_features=1000,
+            ngram_range=(1, 2),
+            stop_words='english'
+        )
+        
+        # Set up the plot
+        self.setup_plot()
+        
+        # Add some sample data
+        self.add_sample_data()
+        
+    def setup_plot(self):
+        """Setup the matplotlib interface"""
+        plt.style.use('seaborn-v0_8')
+        self.fig, (self.ax_main, self.ax_dist) = plt.subplots(1, 2, figsize=(16, 8))
+        
+        # Main plot for 2D visualization
+        self.ax_main.set_title('Vector Embeddings in 2D Space', fontsize=16, fontweight='bold')
+        self.ax_main.set_xlabel('Principal Component 1')
+        self.ax_main.set_ylabel('Principal Component 2')
+        self.ax_main.grid(True, alpha=0.3)
+        
+        # Distance heatmap plot
+        self.ax_dist.set_title('Euclidean Distance Matrix', fontsize=16, fontweight='bold')
+        
+        # Add text input box
+        self.text_box_ax = plt.axes([0.1, 0.02, 0.6, 0.04])
+        self.text_box = TextBox(self.text_box_ax, 'Add Sentence: ', initial='')
+        self.text_box.on_submit(self.add_sentence_from_input)
+        
+        # Add buttons
+        self.button_add_ax = plt.axes([0.72, 0.02, 0.08, 0.04])
+        self.button_add = Button(self.button_add_ax, 'Add')
+        self.button_add.on_clicked(lambda x: self.add_sentence_from_input(self.text_box.text))
+        
+        self.button_clear_ax = plt.axes([0.82, 0.02, 0.08, 0.04])
+        self.button_clear = Button(self.button_clear_ax, 'Clear All')
+        self.button_clear.on_clicked(self.clear_all)
+        
+        self.button_stats_ax = plt.axes([0.92, 0.02, 0.08, 0.04])
+        self.button_stats = Button(self.button_stats_ax, 'Stats')
+        self.button_stats.on_clicked(self.show_stats)
+        
+        plt.subplots_adjust(bottom=0.15)
+        
+    def add_sample_data(self):
+        """Add some sample sentences to demonstrate"""
+        sample_sentences = [
+            "I love programming and coding",
+            "Software development is my passion",
+            "The cat is sleeping peacefully",
+            "Dogs are loyal and friendly pets",
+            "Machine learning is fascinating",
+            "Artificial intelligence will change the world",
+            "The weather is beautiful today",
+            "I enjoy reading books in my free time",
+            "Cooking is a wonderful hobby",
+            "Music brings joy to my life"
+        ]
+        
+        for sentence in sample_sentences:
+            self.sentences.append(sentence)
+        
+        self.update_embeddings()
+        self.update_visualization()
+    
+    def add_sentence_from_input(self, sentence):
+        """Add a sentence from the text input"""
+        sentence = sentence.strip()
+        if sentence and sentence not in self.sentences:
+            self.sentences.append(sentence)
+            self.text_box.set_val('')  # Clear the text box
+            self.update_embeddings()
+            self.update_visualization()
+            print(f"Added: '{sentence}'")
+        elif sentence in self.sentences:
+            print(f"Sentence already exists: '{sentence}'")
+    
+    def update_embeddings(self):
+        """Update embeddings when sentences change"""
+        if len(self.sentences) == 0:
+            return
+            
+        # Generate TF-IDF embeddings
+        self.embeddings = self.vectorizer.fit_transform(self.sentences).toarray()
+        
+        # Calculate euclidean distances
+        self.distances = euclidean_distances(self.embeddings)
+        
+        # Reduce to 2D using PCA
+        if len(self.sentences) > 1:
+            pca = PCA(n_components=2)
+            self.positions_2d = pca.fit_transform(self.embeddings)
+        else:
+            self.positions_2d = np.array([[0, 0]])
+    
+    def update_visualization(self):
+        """Update the visualization plots"""
+        if len(self.sentences) == 0:
+            return
+            
+        # Clear previous plots
+        self.ax_main.clear()
+        self.ax_dist.clear()
+        
+        # Plot 2D scatter
+        colors = plt.cm.Set3(np.linspace(0, 1, len(self.sentences)))
+        
+        scatter = self.ax_main.scatter(
+            self.positions_2d[:, 0], 
+            self.positions_2d[:, 1],
+            c=colors,
+            s=100,
+            alpha=0.7,
+            edgecolors='black',
+            linewidth=1
+        )
+        
+        # Add text labels for each point
+        for i, (x, y) in enumerate(self.positions_2d):
+            # Truncate long sentences for display
+            label = self.sentences[i][:30] + '...' if len(self.sentences[i]) > 30 else self.sentences[i]
+            self.ax_main.annotate(
+                f"{i+1}: {label}",
+                (x, y),
+                xytext=(5, 5),
+                textcoords='offset points',
+                fontsize=8,
+                bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7)
+            )
+        
+        # Draw lines between close points
+        threshold = np.percentile(self.distances[self.distances > 0], 25)  # Bottom 25% of distances
+        for i in range(len(self.sentences)):
+            for j in range(i+1, len(self.sentences)):
+                if self.distances[i, j] <= threshold:
+                    self.ax_main.plot(
+                        [self.positions_2d[i, 0], self.positions_2d[j, 0]],
+                        [self.positions_2d[i, 1], self.positions_2d[j, 1]],
+                        'gray', alpha=0.3, linewidth=1
+                    )
+        
+        self.ax_main.set_title(f'Vector Embeddings in 2D Space ({len(self.sentences)} sentences)', 
+                              fontsize=16, fontweight='bold')
+        self.ax_main.set_xlabel('Principal Component 1')
+        self.ax_main.set_ylabel('Principal Component 2')
+        self.ax_main.grid(True, alpha=0.3)
+        
+        # Plot distance heatmap
+        if len(self.sentences) > 1:
+            im = self.ax_dist.imshow(self.distances, cmap='viridis_r', aspect='auto')
+            
+            # Add colorbar
+            if hasattr(self, 'colorbar'):
+                self.colorbar.remove()
+            self.colorbar = plt.colorbar(im, ax=self.ax_dist)
+            self.colorbar.set_label('Euclidean Distance', rotation=270, labelpad=15)
+            
+            # Add labels
+            self.ax_dist.set_xticks(range(len(self.sentences)))
+            self.ax_dist.set_yticks(range(len(self.sentences)))
+            self.ax_dist.set_xticklabels([f"S{i+1}" for i in range(len(self.sentences))], rotation=45)
+            self.ax_dist.set_yticklabels([f"S{i+1}" for i in range(len(self.sentences))])
+            
+            # Add distance values to heatmap
+            for i in range(len(self.sentences)):
+                for j in range(len(self.sentences)):
+                    text = self.ax_dist.text(j, i, f'{self.distances[i, j]:.2f}',
+                                           ha="center", va="center", color="white", fontsize=8)
+        
+        self.ax_dist.set_title('Euclidean Distance Matrix', fontsize=16, fontweight='bold')
+        
+        plt.tight_layout()
+        plt.draw()
+    
+    def clear_all(self, event=None):
+        """Clear all sentences and reset"""
+        self.sentences = []
+        self.embeddings = None
+        self.distances = None
+        self.positions_2d = None
+        
+        self.ax_main.clear()
+        self.ax_dist.clear()
+        
+        self.ax_main.set_title('Vector Embeddings in 2D Space', fontsize=16, fontweight='bold')
+        self.ax_main.set_xlabel('Principal Component 1')
+        self.ax_main.set_ylabel('Principal Component 2')
+        self.ax_main.grid(True, alpha=0.3)
+        
+        self.ax_dist.set_title('Euclidean Distance Matrix', fontsize=16, fontweight='bold')
+        
+        plt.draw()
+        print("Cleared all sentences!")
+    
+    def show_stats(self, event=None):
+        """Display statistics about the current embeddings"""
+        if len(self.sentences) == 0:
+            print("No sentences to analyze!")
+            return
+        
+        print("\n" + "="*60)
+        print("VECTOR EMBEDDING STATISTICS")
+        print("="*60)
+        print(f"Number of sentences: {len(self.sentences)}")
+        print(f"Embedding dimensions: {self.embeddings.shape[1]}")
+        print()
+        
+        if len(self.sentences) > 1:
+            # Distance statistics
+            non_zero_distances = self.distances[self.distances > 0]
+            print("DISTANCE STATISTICS:")
+            print(f"Average distance: {np.mean(non_zero_distances):.4f}")
+            print(f"Standard deviation: {np.std(non_zero_distances):.4f}")
+            print(f"Minimum distance: {np.min(non_zero_distances):.4f}")
+            print(f"Maximum distance: {np.max(non_zero_distances):.4f}")
+            print()
+            
+            # Find most similar and dissimilar pairs
+            mask = np.triu(np.ones_like(self.distances), k=1).astype(bool)
+            upper_tri_distances = self.distances[mask]
+            indices = np.where(mask)
+            
+            min_idx = np.argmin(upper_tri_distances)
+            max_idx = np.argmax(upper_tri_distances)
+            
+            print("MOST SIMILAR SENTENCES:")
+            i, j = indices[0][min_idx], indices[1][min_idx]
+            print(f"Distance {self.distances[i, j]:.4f}:")
+            print(f"  '{self.sentences[i]}'")
+            print(f"  '{self.sentences[j]}'")
+            print()
+            
+            print("MOST DISSIMILAR SENTENCES:")
+            i, j = indices[0][max_idx], indices[1][max_idx]
+            print(f"Distance {self.distances[i, j]:.4f}:")
+            print(f"  '{self.sentences[i]}'")
+            print(f"  '{self.sentences[j]}'")
+            print()
+        
+        # List all sentences
+        print("ALL SENTENCES:")
+        for i, sentence in enumerate(self.sentences):
+            print(f"{i+1:2d}. {sentence}")
+        
+        print("="*60)
+    
+    def get_sentence_similarities(self, sentence_idx):
+        """Get similarities for a specific sentence"""
+        if sentence_idx >= len(self.sentences):
+            return None
+        
+        similarities = []
+        for i, other_sentence in enumerate(self.sentences):
+            if i != sentence_idx:
+                distance = self.distances[sentence_idx, i]
+                similarity = 1 / (1 + distance)  # Convert distance to similarity
+                similarities.append((i, other_sentence, distance, similarity))
+        
+        # Sort by distance (most similar first)
+        similarities.sort(key=lambda x: x[2])
+        return similarities
+    
+    def find_clusters(self, max_distance=0.5):
+        """Find clusters of similar sentences"""
+        if len(self.sentences) < 2:
+            return []
+        
+        from sklearn.cluster import AgglomerativeClustering
+        
+        clustering = AgglomerativeClustering(
+            n_clusters=None, 
+            distance_threshold=max_distance,
+            linkage='average'
+        )
+        
+        cluster_labels = clustering.fit_predict(self.embeddings)
+        
+        clusters = {}
+        for i, label in enumerate(cluster_labels):
+            if label not in clusters:
+                clusters[label] = []
+            clusters[label].append((i, self.sentences[i]))
+        
+        return clusters
+    
+    def run(self):
+        """Run the interactive visualizer"""
+        print("Vector Embedding Visualizer Started!")
+        print("=" * 50)
+        print("Instructions:")
+        print("- Type a sentence in the text box and press Enter or click 'Add'")
+        print("- Click 'Clear All' to remove all sentences")
+        print("- Click 'Stats' to see detailed statistics")
+        print("- Close the plot window to exit")
+        print()
+        print("Sample sentences have been loaded. Try adding your own!")
+        
+        plt.show()
+
+# Additional utility functions
+def analyze_sentence_similarity(visualizer, sentence1, sentence2):
+    """Analyze similarity between two specific sentences"""
+    if sentence1 in visualizer.sentences and sentence2 in visualizer.sentences:
+        idx1 = visualizer.sentences.index(sentence1)
+        idx2 = visualizer.sentences.index(sentence2)
+        distance = visualizer.distances[idx1, idx2]
+        similarity = 1 / (1 + distance)
+        
+        print(f"Similarity Analysis:")
+        print(f"Sentence 1: '{sentence1}'")
+        print(f"Sentence 2: '{sentence2}'")
+        print(f"Euclidean Distance: {distance:.4f}")
+        print(f"Similarity Score: {similarity:.4f}")
+        
+        return distance, similarity
+    else:
+        print("One or both sentences not found in the dataset")
+        return None
+
+def export_embeddings_to_csv(visualizer, filename='embeddings.csv'):
+    """Export embeddings and sentences to CSV"""
+    if visualizer.embeddings is not None:
+        df = pd.DataFrame(visualizer.embeddings)
+        df['sentence'] = visualizer.sentences
+        df.to_csv(filename, index=False)
+        print(f"Embeddings exported to {filename}")
+    else:
+        print("No embeddings to export")
+
+# Example usage
+if __name__ == "__main__":
+    # Create and run the visualizer
+    visualizer = VectorEmbeddingVisualizer()
+    
+    # You can also add sentences programmatically
+    # visualizer.add_sentence_from_input("Your custom sentence here")
+    
+    # Run the interactive interface
+    visualizer.run()
+    
+    # After closing the plot, you can still use the visualizer object
+    # For example:
+    # visualizer.show_stats()
+    # export_embeddings_to_csv(visualizer)
+    # clusters = visualizer.find_clusters(max_distance=0.8)
+    # print("Clusters found:", clusters)
